@@ -84,6 +84,59 @@ export const dispatchLog = (type, message) => {
   saveLogToFile(detail);
 };
 
+const dispatchUnauthorizedTestLog = async (error) => {
+  try {
+    const config = error.config || {};
+    const response = error.response || {};
+    
+    // Auth state details
+    const accessToken = localStorage.getItem('access_token');
+    const refreshToken = localStorage.getItem('refresh_token');
+    const tokenTimestamp = localStorage.getItem('token_timestamp');
+    const expiresIn = localStorage.getItem('expires_in');
+    const clientType = localStorage.getItem('client-type') || 'web';
+    const refreshEnabled = localStorage.getItem('refresh-enabled') !== 'false';
+    const tokenLife = getTokenLifeRemaining();
+    
+    const details = {
+      request: {
+        url: config.url,
+        baseURL: config.baseURL,
+        method: config.method,
+        headers: config.headers,
+        data: config.data,
+        params: config.params
+      },
+      response: {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        data: response.data
+      },
+      auth: {
+        accessToken,
+        refreshToken,
+        tokenTimestamp,
+        expiresIn,
+        clientType,
+        refreshEnabled,
+        tokenLifeRemaining: tokenLife,
+        systemTime: new Date().toISOString()
+      }
+    };
+
+    const message = `🚨 [401 UNAUTHORIZED] Test endpoint ${config.method?.toUpperCase()} ${config.url} returned 401. calculated life: ${tokenLife}`;
+    
+    await saveLogToFile({
+      type: 'unauthorized-test',
+      message,
+      details
+    });
+  } catch (err) {
+    console.error('Failed to log unauthorized test error', err);
+  }
+};
+
 // --- REQUEST INTERCEPTOR ---
 api.interceptors.request.use(
   (config) => {
@@ -148,6 +201,10 @@ api.interceptors.response.use(
   },
   async (error) => {
     const originalRequest = error.config;
+
+    if (error.response?.status === 401 && originalRequest?.url?.includes('/suppliers/users/information/139')) {
+      dispatchUnauthorizedTestLog(error);
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       const isRefreshEnabled = localStorage.getItem('refresh-enabled') !== 'false';
