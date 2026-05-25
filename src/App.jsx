@@ -56,13 +56,14 @@ const App = () => {
     };
   }, [user]);
 
-  // Proactive Refresh (30s before expiry)
+  // Proactive Refresh
   const [isProactiveRefreshing, setIsProactiveRefreshing] = useState(false);
   
   useEffect(() => {
-    if (timeLeft === 30 && refreshEnabled && !isProactiveRefreshing && user) {
+    const proactiveMargin = parseInt(import.meta.env.VITE_PROACTIVE_REFRESH_SECONDS || '30', 10);
+    if (timeLeft === proactiveMargin && refreshEnabled && !isProactiveRefreshing && user) {
       setIsProactiveRefreshing(true);
-      dispatchLog('warning', '⏰ [PROACTIVE] 30s remaining. Triggering early refresh...');
+      dispatchLog('warning', `⏰ [PROACTIVE] ${proactiveMargin}s remaining. Triggering early refresh...`);
       handleManualRefresh();
     }
   }, [timeLeft, refreshEnabled, isProactiveRefreshing, user]);
