@@ -9,6 +9,7 @@ const TIMEZONE = import.meta.env.VITE_API_TIMEZONE || 'America/Bogota';
 
 const api = axios.create({
   baseURL: API_BASE_URL || 'http://localhost:8001/api/v2',
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -76,9 +77,98 @@ const getTokenLifeRemaining = () => {
   }
 };
 
+// Global cache to prevent constant HTTP calls for token life remaining logs
+let cachedRefreshSecondsRemaining = null;
+let lastStatusCheckTimestamp = null;
+
+export const getRefreshTokenLifeRemaining = () => {
+  const token = localStorage.getItem('access_token');
+  if (!token) return 'N/A';
+
+  const clientType = localStorage.getItem('client-type') || 'mobile';
+
+  // If we checked status in the last 15 seconds, we estimate from cache to prevent spamming the server in interceptor logs
+  if (cachedRefreshSecondsRemaining !== null && lastStatusCheckTimestamp !== null) {
+    const elapsed = Math.floor((Date.now() - lastStatusCheckTimestamp) / 1000);
+    const estimatedTimeLeft = cachedRefreshSecondsRemaining - elapsed;
+    
+    if (estimatedTimeLeft <= 0) return 'EXPIRED';
+    
+    const days = Math.floor(estimatedTimeLeft / 86400);
+    const hours = Math.floor((estimatedTimeLeft % 86400) / 3600);
+    const minutes = Math.floor((estimatedTimeLeft % 3600) / 60);
+    const secs = estimatedTimeLeft % 60;
+    
+    return `${days}d ${hours}h ${minutes}m ${secs}s`;
+  }
+
+  // Trigger an asynchronous status check to update the cache for subsequent calls
+  // (We don't await it here to prevent blocking standard Axios requests)
+  triggerStatusCheck();
+
+  // Fallback to static estimation if cache hasn't loaded yet
+  const timestampStr = localStorage.getItem('token_timestamp');
+  if (!timestampStr) return 'Estimating...';
+  const timestamp = parseInt(timestampStr, 10);
+  if (isNaN(timestamp)) return 'Estimating...';
+  const refreshExpiresIn = clientType === 'web' ? 1296000 : 604800; // default backup
+  const elapsedSeconds = Math.floor((Date.now() - timestamp) / 1000);
+  const timeLeft = refreshExpiresIn - elapsedSeconds;
+  if (timeLeft <= 0) return 'EXPIRED';
+  const days = Math.floor(timeLeft / 86400);
+  const hours = Math.floor((timeLeft % 86400) / 3600);
+  const minutes = Math.floor((timeLeft % 3600) / 60);
+  return `~${days}d ${hours}h ${minutes}m (Est)`;
+};
+
+const triggerStatusCheck = async () => {
+  const now = Date.now();
+  // Limit status checks to once every 10 seconds to protect API health
+  if (lastStatusCheckTimestamp && now - lastStatusCheckTimestamp < 10000) {
+    return;
+  }
+
+  const token = localStorage.getItem('access_token');
+  if (!token) return;
+
+  lastStatusCheckTimestamp = now;
+
+  try {
+    const clientType = localStorage.getItem('client-type') || 'web';
+    const storedRefreshToken = localStorage.getItem('refresh_token');
+
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'X-Client-Type': clientType
+    };
+
+    if (clientType === 'mobile' && storedRefreshToken) {
+      headers['X-Refresh-Token'] = storedRefreshToken;
+    }
+
+    // Call raw fetch/axios to avoid interceptor loop
+    const response = await axios.get((API_BASE_URL || 'http://localhost:8001/api/v2') + '/auth/login/status', {
+      headers
+    });
+
+    if (response.data?.success) {
+      cachedRefreshSecondsRemaining = response.data.seconds_remaining;
+      lastStatusCheckTimestamp = Date.now();
+      
+      // Let standard UI know that token diagnostics updated
+      window.dispatchEvent(new CustomEvent('token-diagnostics-updated', {
+        detail: response.data
+      }));
+    }
+  } catch (err) {
+    // Gracefully handle unauthenticated/network errors on check
+  }
+};
+
 export const dispatchLog = (type, message) => {
   const tokenLife = getTokenLifeRemaining();
-  const formattedMessage = `[Life: ${tokenLife}] ${message}`;
+  const refreshLife = getRefreshTokenLifeRemaining();
+  const formattedMessage = `🔑[Access: ${tokenLife}] 🔄[Refresh: ${refreshLife}] ${message}`;
   const detail = { type, message: formattedMessage };
   window.dispatchEvent(new CustomEvent('api-log', { detail }));
   saveLogToFile(detail);
@@ -236,8 +326,8 @@ api.interceptors.response.use(
           const clientType = localStorage.getItem('client-type') || 'mobile'; // Default a mobile para más estabilidad
           const storedRefreshToken = localStorage.getItem('refresh_token');
           
-          // En modo App, el refresh_token es obligatorio en el body
-          const payload = { refresh_token: storedRefreshToken };
+          // En modo Web el refresh token viaja por cookie (HttpOnly), en modo App viaja en el body
+          const payload = clientType === 'web' ? {} : { refresh_token: storedRefreshToken };
           
           dispatchLog('info', `🔄 [REFRESH] Calling ${import.meta.env.VITE_API_REFRESH_PATH} (${clientType})...`);
           dispatchLog('info', `📦 [REFRESH PAYLOAD] Sending Body: ${JSON.stringify(payload)}`);
