@@ -121,6 +121,11 @@ export const getRefreshTokenLifeRemaining = () => {
   return `~${days}d ${hours}h ${minutes}m (Est)`;
 };
 
+export const resetRefreshTokenCache = () => {
+  cachedRefreshSecondsRemaining = null;
+  lastStatusCheckTimestamp = null;
+};
+
 const triggerStatusCheck = async () => {
   const now = Date.now();
   // Limit status checks to once every 10 seconds to protect API health
@@ -139,7 +144,8 @@ const triggerStatusCheck = async () => {
 
     const headers = {
       'Authorization': `Bearer ${token}`,
-      'X-Client-Type': clientType
+      'X-Client-Type': clientType,
+      'X-Tenant': TENANT
     };
 
     if (clientType === 'mobile' && storedRefreshToken) {
@@ -148,7 +154,8 @@ const triggerStatusCheck = async () => {
 
     // Call raw fetch/axios to avoid interceptor loop
     const response = await axios.get((API_BASE_URL || 'http://localhost:8001/api/v2') + '/auth/login/status', {
-      headers
+      headers,
+      withCredentials: true
     });
 
     if (response.data?.success) {
@@ -297,8 +304,14 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // EXCLUSIÓN DE PRUEBAS: Si es el endpoint de prueba '/suppliers/users/information/139',
+      // no ejecutamos la rotación automática para permitir visualizar y capturar el 401 de forma limpia
+      if (originalRequest.url?.includes('/suppliers/users/information/139')) {
+        dispatchLog('warning', '⚠️ [TEST EXCLUSION] 401 detected on test URL. Automatic retry blocked to allow manual audit.');
+        return Promise.reject(error);
+      }
+
       const isRefreshEnabled = localStorage.getItem('refresh-enabled') !== 'false';
-      
       if (!isRefreshEnabled) {
         dispatchLog('warning', '⛔ [REFRESH DISABLED] 401 received but automatic rotation is OFF.');
         return Promise.reject(error);

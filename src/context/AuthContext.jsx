@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import api, { dispatchLog } from '../api/axios';
+import api, { dispatchLog, resetRefreshTokenCache } from '../api/axios';
 
 const AuthContext = createContext(null);
 
@@ -22,22 +22,37 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const loginPath = import.meta.env.VITE_API_LOGIN_PATH;
+      // Primero aseguramos guardar el tipo de cliente para que los headers del request salgan correctamente alineados
+      localStorage.setItem('client-type', clientType);
+      
       const response = await api.post(loginPath, { 
         email, 
         password,
         app_id: import.meta.env.VITE_APP_ID || '' 
       });
 
-      const { token } = response.data;
+      const { user, token, refresh_token, expires_in } = response.data;
       
-      // Guardamos el token inicial
+      // Guardamos el token inicial y tipo de cliente
       localStorage.setItem('access_token', token);
-      localStorage.setItem('client-type', clientType);
-      dispatchLog('info', `📧 [STEP 1 SUCCESS] Email authenticated. Proceeding to PIN step...`);
 
-      // AUTOMATIZACIÓN: Llamamos al paso 2 inmediatamente
-      const pin = import.meta.env.VITE_DEFAULT_PIN || '8888';
-      return await loginByPin(pin);
+      if (clientType === 'web') {
+        // En WEB, el primer paso (email + pass) es el definitivo. Guardamos datos finales y completamos la sesión.
+        setUser(user);
+        localStorage.setItem('user', JSON.stringify(user));
+        localStorage.setItem('token_timestamp', Date.now().toString());
+        if (expires_in) localStorage.setItem('expires_in', expires_in.toString());
+        // En web el refresh token viaja en Cookie, no lo guardamos en localStorage.
+        
+        dispatchLog('success', `🌐 [WEB LOGIN SUCCESS] Authenticated directly via Email. Session started for ${user.name}.`);
+        window.dispatchEvent(new CustomEvent('token-update'));
+        return { success: true };
+      } else {
+        // En MOBILE, avanzamos al paso 2 del PIN automáticamente
+        dispatchLog('info', `📧 [STEP 1 SUCCESS] Email authenticated. Proceeding to PIN step...`);
+        const pin = import.meta.env.VITE_DEFAULT_PIN || '8888';
+        return await loginByPin(pin);
+      }
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message;
       dispatchLog('error', `❌ [AUTHENTICATION FAILED] ${errorMsg}`);
@@ -47,10 +62,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.clear();
-    dispatchLog('info', '🚪 [LOGOUT] User logged out and storage cleared.');
+  const logout = async () => {
+    try {
+      const clientType = localStorage.getItem('client-type') || 'web';
+      const storedRefreshToken = localStorage.getItem('refresh_token');
+      
+      const payload = clientType === 'web' ? {} : { refresh_token: storedRefreshToken };
+      
+      // Llamamos al backend para que limpie e invalide la sesión y borre la cookie de QA/Prod
+      await api.post('/auth/login/logout', payload);
+    } catch (err) {
+      // Ignorar fallos de red en logout para no impedir el borrado local
+    } finally {
+      setUser(null);
+      localStorage.clear();
+      // Reseteamos el cache en axios directamente de forma estática
+      resetRefreshTokenCache();
+      
+      dispatchLog('info', '🚪 [LOGOUT] Session destroyed, local storage cleared, and dynamic cache reset.');
+    }
   };
 
   const loginByPin = async (pin) => {

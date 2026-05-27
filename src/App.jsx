@@ -20,6 +20,9 @@ const App = () => {
   
   // Timer Logic
   const getDynamicExpiry = () => parseInt(localStorage.getItem('expires_in') || import.meta.env.VITE_TOKEN_EXPIRY_SECONDS || '300');
+  const [proactiveRefreshSeconds, setProactiveRefreshSeconds] = useState(() => {
+    return parseInt(localStorage.getItem('proactive-refresh-seconds') || import.meta.env.VITE_PROACTIVE_REFRESH_SECONDS || '30', 10);
+  });
   const [timeLeft, setTimeLeft] = useState(getDynamicExpiry());
   const [graceTime, setGraceTime] = useState(0); // Contador hacia adelante (Gracia)
   const [now, setNow] = useState(new Date());
@@ -62,13 +65,32 @@ const App = () => {
   const [isProactiveRefreshing, setIsProactiveRefreshing] = useState(false);
   
   useEffect(() => {
-    const proactiveMargin = parseInt(import.meta.env.VITE_PROACTIVE_REFRESH_SECONDS || '30', 10);
-    if (timeLeft === proactiveMargin && refreshEnabled && !isProactiveRefreshing && user) {
+    // Verificamos de forma estricta que la rotación automática esté en true y haya un usuario logueado
+    if (!refreshEnabled || isProactiveRefreshing || !user) return;
+
+    let shouldTrigger = false;
+    
+    if (proactiveRefreshSeconds < 0) {
+      // Caso NEGATIVO: antes de expirar el Access Token (Proactivo)
+      // Ejemplo: -10s significa disparar cuando al token le queden 10 segundos o menos
+      const targetSecondsBeforeExpiry = Math.abs(proactiveRefreshSeconds);
+      shouldTrigger = timeLeft <= targetSecondsBeforeExpiry && timeLeft > 0;
+    } else {
+      // Caso POSITIVO (o cero): tras expirar el Access Token, durante el tiempo de gracia (Overtime)
+      // Ejemplo: +10s significa disparar cuando lleve 10 segundos o más vencido
+      shouldTrigger = graceTime >= proactiveRefreshSeconds && timeLeft === 0;
+    }
+
+    if (shouldTrigger) {
       setIsProactiveRefreshing(true);
-      dispatchLog('warning', `⏰ [PROACTIVE] ${proactiveMargin}s remaining. Triggering early refresh...`);
+      const logMessage = proactiveRefreshSeconds < 0 
+        ? `⏰ [PROACTIVE EARLY REFRESH] triggered at ${timeLeft}s remaining (Threshold: ${proactiveRefreshSeconds}s).`
+        : `⏰ [OVERTIME GRACE REFRESH] triggered at +${graceTime}s of overtime (Threshold: +${proactiveRefreshSeconds}s).`;
+        
+      dispatchLog('warning', logMessage);
       handleManualRefresh();
     }
-  }, [timeLeft, refreshEnabled, isProactiveRefreshing, user]);
+  }, [timeLeft, graceTime, refreshEnabled, isProactiveRefreshing, proactiveRefreshSeconds, user]);
 
   // Auto-Ping Logic (Sequential)
   useEffect(() => {
@@ -328,6 +350,71 @@ const App = () => {
                   >
                     {refreshEnabled ? 'ON' : 'OFF'}
                   </button>
+                </div>
+
+                {/* Proactive Refresh Seconds Offset Adjuster */}
+                <div style={{ 
+                  padding: '1rem', 
+                  background: 'rgba(59, 130, 246, 0.05)', 
+                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                  borderRadius: '12px', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  gap: '0.8rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 'bold' }}>
+                      Proactive Refresh Threshold
+                    </span>
+                    <span style={{ fontSize: '1rem', color: '#60a5fa', fontWeight: 'bold' }}>
+                      {proactiveRefreshSeconds}s
+                    </span>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        const nextVal = Math.max(proactiveRefreshSeconds - 5, -120);
+                        setProactiveRefreshSeconds(nextVal);
+                        localStorage.setItem('proactive-refresh-seconds', nextVal.toString());
+                      }}
+                      className="btn"
+                      style={{ flex: 1, padding: '0.4rem', fontSize: '0.75rem', backgroundColor: '#374151', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      title="Make it more negative to trigger earlier before expiration"
+                    >
+                      -5s (Earlier / Proactive)
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        const nextVal = Math.min(proactiveRefreshSeconds + 5, 200);
+                        setProactiveRefreshSeconds(nextVal);
+                        localStorage.setItem('proactive-refresh-seconds', nextVal.toString());
+                      }}
+                      className="btn"
+                      style={{ flex: 1, padding: '0.4rem', fontSize: '0.75rem', backgroundColor: '#374151', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      title="Make it more positive to allow more overtime grace period"
+                    >
+                      +5s (Later / Overtime)
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setProactiveRefreshSeconds(0);
+                        localStorage.setItem('proactive-refresh-seconds', '0');
+                      }}
+                      className="btn"
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      title="Set to 0s to trigger ONLY on 401 error response"
+                    >
+                      Disable (0s)
+                    </button>
+                  </div>
+                  
+                  <p style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    Tip: Set to negative (e.g. <code>-10s</code>) to trigger proactive refresh 10 seconds <strong>before expiration</strong>. Set to positive (e.g. <code>+15s</code>) to let the token expire and trigger 15 seconds <strong>into overtime (grace period)</strong>.
+                  </p>
                 </div>
                 
                 <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', fontSize: '0.85rem' }}>
