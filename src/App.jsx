@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import LogConsole from './components/LogConsole';
 import TokenAuditConsole from './components/TokenAuditConsole';
+import TelemetryConsole from './components/TelemetryConsole';
 import api, { dispatchLog, getRefreshTokenLifeRemaining } from './api/axios';
 
 const App = () => {
@@ -17,6 +18,7 @@ const App = () => {
   const [userDataVisible, setUserDataVisible] = useState(false);
   const [autoPingEnabled, setAutoPingEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState('logs');
+  const [currentView, setCurrentView] = useState('app'); // 'app' or 'telemetry'
   
   // Timer Logic
   const getDynamicExpiry = () => parseInt(localStorage.getItem('expires_in') || import.meta.env.VITE_TOKEN_EXPIRY_SECONDS || '300');
@@ -192,11 +194,62 @@ const App = () => {
             )}
           </div>
         )}
+
+        {/* Global Navigation Menu */}
+        <nav style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: '1rem',
+          marginTop: '1.5rem',
+          background: 'rgba(15, 23, 42, 0.6)',
+          padding: '0.4rem 0.8rem',
+          borderRadius: '30px',
+          border: '1px solid var(--glass-border)',
+          width: 'fit-content',
+          marginLeft: 'auto',
+          marginRight: 'auto'
+        }}>
+          <button 
+            type="button"
+            onClick={() => setCurrentView('app')}
+            style={{
+              padding: '0.5rem 1.2rem',
+              borderRadius: '20px',
+              border: 'none',
+              background: currentView === 'app' ? '#3b82f6' : 'transparent',
+              color: 'white',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.3s',
+              fontSize: '0.8rem'
+            }}
+          >
+            🏠 Demo Dashboard
+          </button>
+          <button 
+            type="button"
+            onClick={() => setCurrentView('telemetry')}
+            style={{
+              padding: '0.5rem 1.2rem',
+              borderRadius: '20px',
+              border: 'none',
+              background: currentView === 'telemetry' ? '#a78bfa' : 'transparent',
+              color: 'white',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.3s',
+              fontSize: '0.8rem'
+            }}
+          >
+            📡 Security Telemetry
+          </button>
+        </nav>
       </header>
 
-      <main className="app-container">
-        {/* Left Side: Controls */}
-        <section>
+      {currentView === 'app' ? (
+        <main className="app-container">
+          {/* Left Side: Controls */}
+          <section>
           {!user ? (
             <div className="glass-card">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
@@ -630,9 +683,18 @@ const App = () => {
             </button>
           </div>
 
-          {activeTab === 'logs' ? <LogConsole /> : <TokenAuditConsole />}
+          {activeTab === 'logs' ? (
+            <LogConsole />
+          ) : (
+            <TokenAuditConsole />
+          )}
         </section>
       </main>
+      ) : (
+        <main style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
+          <TelemetryConsole />
+        </main>
+      )}
     </div>
   );
 };
