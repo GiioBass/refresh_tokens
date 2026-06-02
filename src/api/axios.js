@@ -148,13 +148,15 @@ const triggerStatusCheck = async () => {
       'X-Tenant': TENANT
     };
 
+    const params = {};
     if (clientType === 'mobile' && storedRefreshToken) {
-      headers['X-Refresh-Token'] = storedRefreshToken;
+      params.refresh_token = storedRefreshToken;
     }
 
     // Call raw fetch/axios to avoid interceptor loop
     const response = await axios.get((API_BASE_URL || 'http://localhost:8001/api/v2') + '/auth/login/status', {
       headers,
+      params,
       withCredentials: true
     });
 

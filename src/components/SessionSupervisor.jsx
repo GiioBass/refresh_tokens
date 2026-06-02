@@ -20,11 +20,11 @@ const SessionSupervisor = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get('/auth/login/admin/sessions');
+      const response = await api.get('/auth/login/supervisor/sessions');
       if (response.data?.success) {
         setSessions(response.data.sessions || []);
       } else {
-        setError('Failed to load active sessions.');
+        setError(response.data?.message || 'Failed to load active sessions.');
       }
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Error connecting to admin session service.');
@@ -74,7 +74,7 @@ const SessionSupervisor = () => {
     setError(null);
     setSuccessMsg(null);
     try {
-      const response = await api.delete(`/auth/login/admin/sessions/${sessionId}`);
+      const response = await api.delete(`/auth/login/supervisor/sessions/${sessionId}`);
       if (response.data?.success) {
         setSuccessMsg(`✅ Session #${sessionId} and its complete token chain revoked successfully!`);
         setSelectedSession(null);
