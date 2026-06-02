@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import LogConsole from './components/LogConsole';
 import TokenAuditConsole from './components/TokenAuditConsole';
 import TelemetryConsole from './components/TelemetryConsole';
+import SessionSupervisor from './components/SessionSupervisor';
 import api, { dispatchLog, getRefreshTokenLifeRemaining } from './api/axios';
 
 const App = () => {
@@ -242,6 +243,23 @@ const App = () => {
             }}
           >
             📡 Security Telemetry
+          </button>
+          <button 
+            type="button"
+            onClick={() => setCurrentView('sessions')}
+            style={{
+              padding: '0.5rem 1.2rem',
+              borderRadius: '20px',
+              border: 'none',
+              background: currentView === 'sessions' ? '#10b981' : 'transparent',
+              color: 'white',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.3s',
+              fontSize: '0.8rem'
+            }}
+          >
+            👥 Sessions Supervisor
           </button>
         </nav>
       </header>
@@ -690,9 +708,13 @@ const App = () => {
           )}
         </section>
       </main>
-      ) : (
+      ) : currentView === 'telemetry' ? (
         <main style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
           <TelemetryConsole />
+        </main>
+      ) : (
+        <main style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
+          <SessionSupervisor />
         </main>
       )}
     </div>
