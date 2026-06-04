@@ -49,6 +49,49 @@ Puedes ejecutar el script directamente desde la raíz del proyecto usando Node.j
 
 ---
 
+## 🚀 Comandos de Ejecución
+
+Para iniciar el simulador, ejecuta el siguiente comando en la terminal desde la raíz del proyecto (`/var/www/html/refresh_tokens`):
+
+```bash
+# 1. Ejecución simple de concurrencia y ataque replay
+node auth-stress-simulator.js
+
+# 2. Ejecución en bucle continuo (para ver rotación de tokens en vivo cada 10s)
+node auth-stress-simulator.js --loop=true --interval=10000
+
+# 3. Personalizando la URL del backend de destino
+node auth-stress-simulator.js --url=http://localhost:8001/api/v2 --loop=true --interval=5000
+```
+
+---
+
+## 👥 Configuración Multiusuario con JSON (`stress-users.json`)
+
+Si deseas simular múltiples usuarios con correos y códigos PIN diferentes (usando la misma contraseña global de pruebas configurada en el `.env`), puedes crear un archivo llamado `stress-users.json` en la raíz del proyecto.
+
+### Ejemplo de Estructura de `stress-users.json`:
+```json
+[
+  {
+    "email": "system@eurofrutta.co.uk",
+    "pin": "1231"
+  },
+  {
+    "email": "system@foodpointproduce.co.uk",
+    "pin": "2342"
+  },
+  {
+    "email": "test@test.com",
+    "pin": "3453"
+  }
+]
+```
+
+*Cuando el archivo `stress-users.json` está presente, el script creará automáticamente un usuario virtual para cada entrada del arreglo en lugar de utilizar los valores individuales del `.env`.*
+
+---
+
 ## 🔄 Fases de Simulación Detalladas
 
 ### Fase 1: Simulación de Expiración y Concurrencia (Race Condition Interceptor)

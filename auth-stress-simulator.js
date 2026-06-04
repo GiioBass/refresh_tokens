@@ -137,13 +137,15 @@ async function sleep(ms) {
 }
 
 class VirtualUser {
-  constructor(id) {
+  constructor(id, email, pin) {
     this.id = id;
-    this.email = TEST_EMAIL;
+    this.email = email || TEST_EMAIL;
+    this.pin = pin || TEST_PIN;
     this.password = TEST_PASSWORD;
     this.accessToken = null;
     this.refreshToken = null;
     this.rotationCount = 0;
+
     this.client = axios.create({
       baseURL: API_BASE_URL,
       headers: {
@@ -151,12 +153,14 @@ class VirtualUser {
         'Content-Type': 'application/json',
         'X-Client-Type': CLIENT_TYPE,
         'X-Tenant': TENANT,
-        'X-Device-Name': `Stress-Bot-User-${id}`
+        'X-Device-Name': `Stress-Bot-${this.email}-${id}`
       }
     });
 
     this.isRefreshing = false;
     this.failedQueue = [];
+    this.expiresIn = 300; // default 5m
+    this.tokenTimestamp = Date.now();
 
     this.setupInterceptors();
   }
@@ -205,26 +209,29 @@ class VirtualUser {
                   'Accept': 'application/json',
                   'Content-Type': 'application/json',
                   'X-Client-Type': CLIENT_TYPE,
-                  'X-Tenant': TENANT
+                  'X-Tenant': TENANT,
+                  'X-Device-Name': `Stress-Bot-${this.email}-${this.id}`
                 }
               });
 
-              log(`   -> [User #${this.id}] 📥 Response 200 from ${REFRESH_PATH} | Rotated successfully!`, 'INFO');
-              
+              log(`   -> [User #${this.id}] 📥 Response 200 from ${REFRESH_PATH} | Rotated successfully!`, 'SUCCESS');
+
               const responseData = refreshResponse.data.data || refreshResponse.data;
-              this.accessToken = responseData.access_token;
-              
-              if (CLIENT_TYPE === 'mobile' && responseData.refresh_token) {
-                this.refreshToken = responseData.refresh_token;
+              const { access_token, refresh_token, expires_in } = responseData;
+
+              this.accessToken = access_token;
+              if (CLIENT_TYPE === 'mobile' && refresh_token) {
+                this.refreshToken = refresh_token;
               }
+              this.expiresIn = expires_in || 300;
+              this.tokenTimestamp = Date.now();
 
               this.rotationCount++;
 
-              // Process queue
-              this.failedQueue.forEach(prom => prom.resolve(this.accessToken));
-              this.failedQueue = [];
+              this.isRefreshing = false;
+              this.processQueue(null, access_token);
 
-              originalRequest.headers['Authorization'] = `Bearer ${this.accessToken}`;
+              originalRequest.headers['Authorization'] = `Bearer ${access_token}`;
               resolve(this.client(originalRequest));
             } catch (refreshError) {
               const status = refreshError.response?.status || 'Network Error';
@@ -244,58 +251,80 @@ class VirtualUser {
     );
   }
 
-  async login() {
-    try {
-      log(`[User #${this.id}] 🔑 Step 1: Authenticating Email...`);
-      log(`   -> POST ${LOGIN_PATH} | Body: { email: "${this.email}", app_id: ${process.env.VITE_APP_ID || 1} }`);
-      
-      const response = await this.client.post(LOGIN_PATH, {
-        email: this.email,
-        password: this.password,
-        app_id: process.env.VITE_APP_ID || 1
-      });
-
-      log(`   -> Response Status: ${response.status} | Body: ${JSON.stringify(response.data).substring(0, 100)}...`);
-
-      if (!response.data?.success) {
-        log(`[User #${this.id}] ❌ Step 1 failed: ${JSON.stringify(response.data)}`, 'ERROR');
-        return false;
-      }
-
-      const intermediateToken = response.data.token || response.data.data?.access_token;
-
-      if (CLIENT_TYPE === 'web') {
-        this.accessToken = intermediateToken;
-        this.refreshToken = response.data.refresh_token || response.data.data?.refresh_token;
-        log(`[User #${this.id}] ✅ Web Login successful. Session started.`);
-        return true;
-      } else {
-        log(`[User #${this.id}] 🔑 Step 2: Authenticating PIN...`);
-        log(`   -> POST ${PIN_PATH} | Body: { pin: "${TEST_PIN}", app_id: 2 } | Headers: Authorization: Bearer ${intermediateToken.substring(0, 15)}...`);
+  async login(maxRetries = 3, delayMs = 2000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        log(`[User #${this.id}] 🔑 Step 1: Authenticating Email (Attempt ${attempt}/${maxRetries})...`);
+        log(`   -> POST ${LOGIN_PATH} | Body: { email: "${this.email}", app_id: ${process.env.VITE_APP_ID || 1} }`);
         
-        const pinResponse = await this.client.post(PIN_PATH, {
-          pin: TEST_PIN,
-          app_id: 2
-        }, {
-          headers: { 'Authorization': `Bearer ${intermediateToken}` }
+        const response = await this.client.post(LOGIN_PATH, {
+          email: this.email,
+          password: this.password,
+          app_id: process.env.VITE_APP_ID || 1
         });
 
-        log(`   -> Response Status: ${pinResponse.status} | Body: ${JSON.stringify(pinResponse.data).substring(0, 100)}...`);
+        log(`   -> Response Status: ${response.status} | Body: ${JSON.stringify(response.data).substring(0, 100)}...`);
 
-        if (pinResponse.data?.success) {
-          this.accessToken = pinResponse.data.token || pinResponse.data.data?.access_token;
-          this.refreshToken = pinResponse.data.refresh_token || pinResponse.data.data?.refresh_token;
-          log(`[User #${this.id}] ✅ Mobile Login successful. Final tokens obtained.`);
-          return true;
-        } else {
-          log(`[User #${this.id}] ❌ Step 2 PIN failed: ${JSON.stringify(pinResponse.data)}`, 'ERROR');
+        if (!response.data?.success) {
+          log(`[User #${this.id}] ❌ Step 1 failed: ${JSON.stringify(response.data)}`, 'ERROR');
+          if (attempt < maxRetries) {
+            log(`[User #${this.id}] ⏳ Retrying login in ${delayMs/1000}s...`);
+            await sleep(delayMs);
+            continue;
+          }
           return false;
         }
+
+        const intermediateToken = response.data.token || response.data.data?.access_token;
+
+        if (CLIENT_TYPE === 'web') {
+          const responseData = response.data.data || response.data;
+          this.accessToken = intermediateToken;
+          this.refreshToken = responseData.refresh_token;
+          this.expiresIn = responseData.expires_in || 300;
+          this.tokenTimestamp = Date.now();
+          log(`[User #${this.id}] ✅ Web Login successful. Session started.`);
+          return true;
+        } else {
+          log(`[User #${this.id}] 🔑 Step 2: Authenticating PIN...`);
+          log(`   -> POST ${PIN_PATH} | Body: { pin: "${this.pin}", app_id: 2 } | Headers: Authorization: Bearer ${intermediateToken.substring(0, 15)}...`);
+          
+          const pinResponse = await this.client.post(PIN_PATH, {
+            pin: this.pin,
+            app_id: 2
+          }, {
+            headers: { 'Authorization': `Bearer ${intermediateToken}` }
+          });
+
+          log(`   -> Response Status: ${pinResponse.status} | Body: ${JSON.stringify(pinResponse.data).substring(0, 100)}...`);
+
+          if (pinResponse.data?.success) {
+            const pinData = pinResponse.data.data || pinResponse.data;
+            this.accessToken = pinData.token || pinData.access_token;
+            this.refreshToken = pinData.refresh_token;
+            this.expiresIn = pinData.expires_in || 300;
+            this.tokenTimestamp = Date.now();
+            log(`[User #${this.id}] ✅ Mobile Login successful. Final tokens obtained.`);
+            return true;
+          } else {
+            log(`[User #${this.id}] ❌ Step 2 PIN failed: ${JSON.stringify(pinResponse.data)}`, 'ERROR');
+            if (attempt < maxRetries) {
+              log(`[User #${this.id}] ⏳ Retrying login in ${delayMs/1000}s...`);
+              await sleep(delayMs);
+              continue;
+            }
+            return false;
+          }
+        }
+      } catch (err) {
+        const status = err.response?.status || 'Network Error';
+        const body = JSON.stringify(err.response?.data || 'No data');
+        log(`[User #${this.id}] ❌ Login attempt ${attempt}/${maxRetries} failed: ${err.message} [Status ${status}] | Body: ${body}`, 'ERROR');
+        if (attempt < maxRetries) {
+          log(`[User #${this.id}] ⏳ Retrying login in ${delayMs/1000}s...`);
+          await sleep(delayMs);
+        }
       }
-    } catch (err) {
-      const status = err.response?.status || 'Network Error';
-      const body = JSON.stringify(err.response?.data || 'No data');
-      log(`[User #${this.id}] ❌ Login failed: ${err.message} [Status ${status}] | Body: ${body}`, 'ERROR');
     }
     return false;
   }
@@ -390,10 +419,68 @@ class VirtualUser {
       log(`[User #${this.id}] ⚠️ Warning: Replay attack might not have been caught.`, 'WARN');
     }
   }
+  async rotateTokenDirectly() {
+    if (this.isRefreshing) return;
+    this.isRefreshing = true;
+
+    try {
+      const payload = CLIENT_TYPE === 'mobile' ? { refresh_token: this.refreshToken } : {};
+      log(`   -> [User #${this.id}] 📤 Proactive POST ${REFRESH_PATH} | Payload: ${JSON.stringify(payload)}`);
+      
+      const refreshResponse = await axios.post(`${API_BASE_URL}${REFRESH_PATH}`, payload, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'X-Client-Type': CLIENT_TYPE,
+          'X-Tenant': TENANT,
+          'X-Device-Name': `Stress-Bot-${this.email}-${this.id}`
+        }
+      });
+
+      const responseData = refreshResponse.data.data || refreshResponse.data;
+      const { access_token, refresh_token, expires_in } = responseData;
+
+      log(`   -> [User #${this.id}] 📥 Response 200 from ${REFRESH_PATH} | Proactively rotated successfully!`, 'SUCCESS');
+
+      this.accessToken = access_token;
+      if (CLIENT_TYPE === 'mobile' && refresh_token) {
+        this.refreshToken = refresh_token;
+      }
+      this.expiresIn = expires_in || 300;
+      this.tokenTimestamp = Date.now();
+      this.rotationCount++;
+      this.isRefreshing = false;
+      this.processQueue(null, access_token);
+    } catch (err) {
+      this.isRefreshing = false;
+      this.processQueue(err, null);
+      throw err;
+    }
+  }
 }
 
 async function runStressTest() {
-  const users = Array.from({ length: VIRTUAL_USERS_COUNT }).map((_, i) => new VirtualUser(i + 1));
+  let userConfigs = [];
+  try {
+    const jsonPath = path.resolve(projectDir, 'stress-users.json');
+    if (fs.existsSync(jsonPath)) {
+      userConfigs = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      log(`📖 Loaded ${userConfigs.length} user configurations from stress-users.json`);
+    }
+  } catch (err) {
+    log(`⚠️ Failed to read stress-users.json, using defaults: ${err.message}`, 'WARN');
+  }
+
+  const users = [];
+  if (userConfigs.length > 0) {
+    userConfigs.forEach((cfg, idx) => {
+      users.push(new VirtualUser(idx + 1, cfg.email, cfg.pin));
+    });
+  } else {
+    for (let i = 0; i < VIRTUAL_USERS_COUNT; i++) {
+      users.push(new VirtualUser(i + 1));
+    }
+  }
 
   // Step 1: Login all users
   const loginPromises = users.map(user => user.login());
@@ -438,6 +525,14 @@ async function runStressTest() {
       
       for (const user of activeUsers) {
         try {
+          // Check if token is about to expire proactively (e.g. 5 seconds before expiration)
+          const elapsed = (Date.now() - user.tokenTimestamp) / 1000;
+          const threshold = 5; // seconds before expiration
+          if (user.expiresIn && (user.expiresIn - elapsed <= threshold)) {
+            log(`   [User #${user.id}] ⏰ Proactive check: Token is about to expire in ${Math.round(user.expiresIn - elapsed)}s. Triggering proactive refresh...`);
+            await user.rotateTokenDirectly();
+          }
+
           if (loopCycle % 4 !== 0) {
             log(`   [User #${user.id}] 📡 Sending healthy ping to users/information...`);
             const res = await user.client.get('/suppliers/users/information/139');

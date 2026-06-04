@@ -1,0 +1,15 @@
+[
+  {
+    "email": "user1@creativejungle.co",
+    "pin": "1111"
+  },
+  {
+    "email": "user2@creativejungle.co",
+    "pin": "2222"
+  },
+  {
+    "email": "user1@creativejungle.co",
+    "pin": "3333"
+  }
+]
+

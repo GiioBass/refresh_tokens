@@ -52,7 +52,7 @@ const TelemetryConsole = () => {
   };
 
   return (
-    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', minHeight: '400px' }}>
+    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', minHeight: '750px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <div>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>Security Telemetry Log</h2>
@@ -81,7 +81,7 @@ const TelemetryConsole = () => {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Scrollable list */}
-          <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+          <div style={{ maxHeight: '550px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>

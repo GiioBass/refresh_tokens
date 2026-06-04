@@ -709,11 +709,11 @@ const App = () => {
         </section>
       </main>
       ) : currentView === 'telemetry' ? (
-        <main style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
+        <main style={{ maxWidth: '100%', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
           <TelemetryConsole />
         </main>
       ) : (
-        <main style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
+        <main style={{ maxWidth: '100%', margin: '0 auto', width: '100%', paddingBottom: '3rem' }}>
           <SessionSupervisor />
         </main>
       )}
